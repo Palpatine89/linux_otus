@@ -1,6 +1,8 @@
 import subprocess
 from collections import Counter
-from date import Date
+from datetime import datetime
+
+DATE_FORMAT = "%d-%m-%Y-%H:%M"
 
 
 REPORT_SYSTEM = "Отчёт о состоянии системы:"
@@ -13,6 +15,22 @@ REPORT_MAX_MEMORY = 'Больше всего памяти использует: 
 REPORT_MAX_CPU = 'Больше всего CPU использует: {}'
 
 
+def current_date():
+    """Функция получения текущей даты и времени"""
+    date = datetime.now()
+    return date.strftime(DATE_FORMAT)
+
+
+def get_correct_process_name(process_name):
+    """Функция полученния имени процесса с длинной не более 20 символов"""
+    if len(process_name) > 20:
+        correct_process_name = process_name[:20]
+    else:
+        correct_process_name = process_name
+
+    return correct_process_name
+
+
 def command_parser():
     """Функция парсинга команды 'ps aux'"""
     result = subprocess.run(["ps aux"], shell=True, capture_output=True)
@@ -22,30 +40,27 @@ def command_parser():
     # Собираем список с данными по каждому пользователю
     datas_list = []
     for line in lines[1:]:
-        process_info = line.decode().split()
-        info = [float(process_info[index]) if index != 0 else process_info[index] for index in [0, 1, 2, 3]]
-        datas_list.append(info)
+        user, pid, cpu, mem, *_, ps_name = line.decode().split()
+        pid, cpu, mem = int(pid), float(cpu), float(mem)
+        datas_list.append((user, pid, cpu, mem, ps_name))
 
     # Собираем словарь с суммами по каждому пользователю
     sums_by_users = {}
-    process_list = []  # Список процессов
+    process_param = []
     memory_sum = 0
     cpu_sum = 0
 
     for data in datas_list:
-        user = data[0]
-        process_list.append(data[1])
-        cpu = data[2]
-        memory = data[3]
+        user, pid, cpu, mem, ps_name = data
 
         cpu_sum += cpu
-        memory_sum += memory
+        memory_sum += mem
 
-        if user in sums_by_users:
-            sums_by_users[user][0] += cpu
-            sums_by_users[user][1] += memory
-        else:
-            sums_by_users[user] = [cpu, memory]
+        sums_by_users.setdefault(user, [0, 0])
+        sums_by_users[user][0] += cpu
+        sums_by_users[user][1] += mem
+
+        process_param.append({'pid': pid, 'cpu': cpu, 'mem': mem, 'ps_name': ps_name})
 
     # Получаем список уникальных пользователей
     users_list = [user[0] for user in datas_list]
@@ -55,45 +70,33 @@ def command_parser():
     # Округляем полученные суммы
     round_memory = round(memory_sum, 1)
     round_cpu = round(cpu_sum, 1)
-    process_count = len(process_list)
+    process_count = len(process_param)
 
-    # Получаем пользователя с максимальным потреблением по памяти и процессору
-    max_memory_user = max(sums_by_users, key=lambda x: sums_by_users[x][0])
-    max_cpu_user = max(sums_by_users, key=lambda x: sums_by_users[x][1])
+    # Получаем процесс с максимальным потреблением по памяти
+    max_memory_process_name = max(process_param, key=lambda x: x['mem'])['ps_name']
 
-    if len(max_memory_user) > 20:
-        max_memory_user = max_memory_user[:20]
-    else:
-        max_memory_user = max_memory_user
+    # Получаем процесс с максимальным потреблением по процессору
+    max_cpu_process_name = max(process_param, key=lambda x: x['cpu'])['ps_name']
 
     unique_users = ", ".join([str(user[0]) for user in users_process])
 
-    # Формируем отчет в вывод
-    print(REPORT_SYSTEM)
-    print(REPORT_USERS.format(unique_users))
-    print(REPORT_PROCESS.format(process_count))
-    print(REPORT_USER_PROCESS)
+    # Формируем отчет в тексовый файл и в консоль
+    report = []
+    report.append(REPORT_SYSTEM)
+    report.append(REPORT_USERS.format(unique_users))
+    report.append(REPORT_PROCESS.format(process_count))
+    report.append(REPORT_USER_PROCESS)
     for users in users_process:
-        print(f"{users[0]}: {users[1]}")
-    print(REPORT_TOTAL_MEMORY.format(round_memory))
-    print(REPORT_TOTAL_CPU.format(round_cpu))
-    print(REPORT_MAX_MEMORY.format(max_memory_user))
-    print(REPORT_MAX_CPU.format(max_cpu_user))
+        report.append(f"{users[0]}: {users[1]}")
+    report.append(REPORT_TOTAL_MEMORY.format(round_memory))
+    report.append(REPORT_TOTAL_CPU.format(round_cpu))
+    report.append(REPORT_MAX_MEMORY.format(get_correct_process_name(max_memory_process_name)))
+    report.append(REPORT_MAX_CPU.format(get_correct_process_name(max_cpu_process_name)))
 
-    # Формируем отчет в тексовый файл
-    report = REPORT_SYSTEM + '\n'
-    report += REPORT_USERS.format(unique_users) + '\n'
-    report += REPORT_PROCESS.format(process_count) + '\n'
-    report += REPORT_USER_PROCESS + '\n'
-    for users in users_process:
-        report += f"{users[0]}: {users[1]}\n"
-    report += REPORT_TOTAL_MEMORY.format(round_memory) + '\n'
-    report += REPORT_TOTAL_CPU.format(round_cpu) + '\n'
-    report += REPORT_MAX_MEMORY.format(max_memory_user) + '\n'
-    report += REPORT_MAX_CPU.format(max_cpu_user) + '\n'
-
-    with open(f"{Date.current_date()}-scan.txt", "w") as file:
-        file.write(report)
+    with open(f"{current_date()}-scan.txt", "w") as file:
+        for line in report:
+            file.write(line + '\n')
+            print(line)
 
 
 if __name__ == '__main__':
